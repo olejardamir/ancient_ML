@@ -5,6 +5,7 @@ import argparse
 from .searcher import add_search_args, run_search
 from .trainer import add_train_args, run_train
 from .predictor import add_predict_args, run_predict
+from .inspect_data import add_inspect_args, run_inspect
 
 
 def main() -> None:
@@ -22,6 +23,10 @@ def main() -> None:
     p_predict = sub.add_parser("predict", help="Predict Lotto 6/49 numbers for a draw date")
     add_predict_args(p_predict)
     p_predict.set_defaults(func=run_predict)
+
+    p_inspect = sub.add_parser("inspect-data", help="Check that a Lotto 6/49 CSV loads correctly")
+    add_inspect_args(p_inspect)
+    p_inspect.set_defaults(func=run_inspect)
 
     args = parser.parse_args()
     args.func(args)

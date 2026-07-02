@@ -22,7 +22,7 @@ pip install -r requirements.txt
 
 ## Input data format
 
-Create a CSV file such as `data/draws.csv` using rows like:
+Put your uploaded file at `data/649.csv`. The loader accepts the official header format in that file, for example:
 
 ```csv
 "649",4421,0,"2026-06-03",3,5,6,28,30,37,19
@@ -35,13 +35,34 @@ Columns are interpreted as:
 game, draw_id, ignored, draw_date, n1, n2, n3, n4, n5, n6, bonus
 ```
 
+
+## Verify the uploaded `649.csv`
+
+After placing the file in `data/649.csv`, run:
+
+```bash
+python -m ancient_ml inspect-data --data data/649.csv
+```
+
+Expected for the uploaded file supplied in this chat:
+
+```json
+{
+  "count": 4428,
+  "first_date": "1982-06-12",
+  "last_date": "2026-06-27",
+  "first_draw_id": 1,
+  "last_draw_id": 4428
+}
+```
+
 ## Layer 1: continuous seed search
 
 Run a bounded search:
 
 ```bash
 python -m ancient_ml search \
-  --data data/draws.csv \
+  --data data/649.csv \
   --state state/ancient_ml.sqlite \
   --trials 50000 \
   --top-k 50
@@ -51,7 +72,7 @@ Run an infinite search:
 
 ```bash
 python -m ancient_ml search \
-  --data data/draws.csv \
+  --data data/649.csv \
   --state state/ancient_ml.sqlite \
   --trials 10000 \
   --forever
@@ -65,7 +86,7 @@ Train from the best untrained/promising seeds:
 
 ```bash
 python -m ancient_ml train \
-  --data data/draws.csv \
+  --data data/649.csv \
   --state state/ancient_ml.sqlite \
   --models models \
   --max-candidates 5
