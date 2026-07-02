@@ -1,0 +1,19 @@
+{
+  "ayanamsha": "LAHIRI",
+  "cheap_search": {
+    "train_fraction": 0.70,
+    "validation_weight": 2.0,
+    "bonus_main_weight": 0.25,
+    "main_bonus_weight": 0.50,
+    "three_hit_bonus": 2.0,
+    "repeat_penalty": 0.04
+  },
+  "seed_space": {
+    "year_min": -5000,
+    "year_max": 5000,
+    "latitude_min": -66.0,
+    "latitude_max": 66.0,
+    "longitude_min": -180.0,
+    "longitude_max": 180.0
+  }
+}
