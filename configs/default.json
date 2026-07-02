@@ -11,8 +11,8 @@
   "seed_space": {
     "year_min": -5000,
     "year_max": 5000,
-    "latitude_min": -66.0,
-    "latitude_max": 66.0,
+    "latitude_min": -60.0,
+    "latitude_max": 60.0,
     "longitude_min": -180.0,
     "longitude_max": 180.0
   }

@@ -8,21 +8,24 @@ from pathlib import Path
 import joblib
 import numpy as np
 
-from .feature_builder import cheap_predict, feature_vector
-from .registry import best_candidates, connect, promoted_model, row_to_seed
+from .feature_builder import feature_vector
+from .lotto_mapping import cheap_predict
+from .registry import best_candidates, connect, log_prediction, promoted_model, row_to_seed
 from .scoring import Prediction
 from .vedic_engine import SyntheticSeed
 
 
 def predict_with_payload(payload: dict, draw_date: date) -> Prediction:
-    model = payload["model"]
+    scaler = payload["scaler"]
+    classifier = payload["classifier"]
     seed = SyntheticSeed.from_dict(payload["seed"])
     nums = list(range(1, 50))
     X = np.vstack([feature_vector(seed, draw_date, n) for n in nums])
-    if hasattr(model, "predict_proba"):
-        scores = model.predict_proba(X)[:, 1]
+    X_scaled = scaler.transform(X)
+    if hasattr(classifier, "predict_proba"):
+        scores = classifier.predict_proba(X_scaled)[:, 1]
     else:
-        scores = model.decision_function(X)
+        scores = classifier.decision_function(X_scaled)
     ranked = [n for n, _ in sorted(zip(nums, scores), key=lambda kv: (-kv[1], kv[0]))]
     return Prediction.from_lists(sorted(ranked[:6]), ranked[6])
 
@@ -33,7 +36,19 @@ def run_predict(args: argparse.Namespace) -> None:
     model_row = promoted_model(conn)
     result: dict
     if model_row:
-        payload = joblib.load(model_row["model_path"])
+        model_path = Path(model_row["model_path"])
+        if not model_path.exists():
+            # Resolve relative to --models directory.
+            resolved = Path(args.models) / model_path.name
+            if resolved.exists():
+                model_path = resolved
+            else:
+                print(f"Model file {model_path} not found, falling back to cheap seed.")
+                model_row = None
+        else:
+            model_path = str(model_path)
+    if model_row:
+        payload = joblib.load(str(model_path))
         pred = predict_with_payload(payload, d)
         result = {
             "draw_date": args.date,
@@ -42,7 +57,7 @@ def run_predict(args: argparse.Namespace) -> None:
             "mode": "promoted_ml_model",
             "model_id": model_row["model_id"],
             "seed_id": model_row["seed_id"],
-            "model_path": model_row["model_path"],
+            "model_path": str(model_path),
         }
     else:
         rows = best_candidates(conn, limit=1, only_untrained=False)
@@ -59,6 +74,7 @@ def run_predict(args: argparse.Namespace) -> None:
             "seed": seed.to_dict(),
         }
 
+    log_prediction(conn, args.date, result["mode"], result.get("model_id"), result.get("seed_id"), result["main_numbers"], result["bonus"])
     print(json.dumps(result, indent=2, sort_keys=True))
 
 

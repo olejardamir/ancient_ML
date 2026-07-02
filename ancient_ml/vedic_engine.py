@@ -179,19 +179,12 @@ def _calc_sidereal_body(jd_ut: float, body: int) -> float:
 
 def _sidereal_lagna(jd_ut: float, latitude: float, longitude: float) -> float:
     require_swe()
-    # Ascendant from houses is tropical; subtract ayanamsha for sidereal lagna.
-    # Whole-sign houses are then derived from this lagna sign.
-    try:
-        _cusps, ascmc = swe.houses_ex(jd_ut, latitude, longitude, b"P")
-        tropical_asc = float(ascmc[0])
-        ayan = float(swe.get_ayanamsa_ut(jd_ut))
-        return normalize360(tropical_asc - ayan)
-    except Exception:
-        # Some extreme latitudes can fail for Placidus. Fallback to equal houses.
-        _cusps, ascmc = swe.houses_ex(jd_ut, max(min(latitude, 65.0), -65.0), longitude, b"E")
-        tropical_asc = float(ascmc[0])
-        ayan = float(swe.get_ayanamsa_ut(jd_ut))
-        return normalize360(tropical_asc - ayan)
+    # Equal-house Ascendant. No Placidus fallback needed — equal houses work
+    # reliably across the supported latitude range.
+    _cusps, ascmc = swe.houses_ex(jd_ut, max(min(latitude, 60.0), -60.0), longitude, b"E")
+    tropical_asc = float(ascmc[0])
+    ayan = float(swe.get_ayanamsa_ut(jd_ut))
+    return normalize360(tropical_asc - ayan)
 
 
 def build_kundli(seed: SyntheticSeed) -> Kundli:

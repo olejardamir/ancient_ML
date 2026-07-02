@@ -10,6 +10,9 @@ from typing import Any
 from .vedic_engine import SyntheticSeed
 
 SCHEMA = """
+PRAGMA journal_mode=WAL;
+PRAGMA busy_timeout=5000;
+
 CREATE TABLE IF NOT EXISTS candidates (
     seed_id TEXT PRIMARY KEY,
     seed_json TEXT NOT NULL,
@@ -28,17 +31,82 @@ CREATE TABLE IF NOT EXISTS models (
     train_score REAL NOT NULL,
     validation_score REAL NOT NULL,
     promoted INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'candidate',
     created_at REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS search_runs (
+    run_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at REAL NOT NULL,
+    trials INTEGER NOT NULL,
+    candidates_found INTEGER NOT NULL DEFAULT 0,
+    cycle INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS training_runs (
+    run_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at REAL NOT NULL,
+    seed_id TEXT NOT NULL,
+    model_id TEXT,
+    average_precision REAL,
+    train_points REAL,
+    validation_points REAL,
+    promoted INTEGER NOT NULL DEFAULT 0,
+    duration_seconds REAL
+);
+
+CREATE TABLE IF NOT EXISTS prediction_logs (
+    log_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at REAL NOT NULL,
+    draw_date TEXT NOT NULL,
+    mode TEXT NOT NULL,
+    model_id TEXT,
+    seed_id TEXT,
+    main_numbers TEXT NOT NULL,
+    bonus INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS promotion_history (
+    promotion_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at REAL NOT NULL,
+    model_id TEXT NOT NULL,
+    seed_id TEXT NOT NULL,
+    validation_points REAL NOT NULL,
+    previous_best_points REAL,
+    status TEXT NOT NULL DEFAULT 'promoted'
+);
+
+CREATE TABLE IF NOT EXISTS heartbeats (
+    component TEXT NOT NULL,
+    last_seen REAL NOT NULL,
+    pid INTEGER,
+    PRIMARY KEY (component)
+);
+
+CREATE TABLE IF NOT EXISTS backtest_runs (
+    run_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at REAL NOT NULL,
+    train_draws INTEGER NOT NULL,
+    test_draws INTEGER NOT NULL,
+    random_hits REAL,
+    global_freq_hits REAL,
+    rolling_90d_hits REAL,
+    rolling_365d_hits REAL,
+    repeat_last_hits REAL,
+    cheap_seed_hits REAL,
+    promoted_ml_hits REAL,
+    bonus_behavior TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_candidates_score ON candidates(validation_score DESC, total_score DESC);
 CREATE INDEX IF NOT EXISTS idx_models_promoted ON models(promoted, validation_score DESC);
+CREATE INDEX IF NOT EXISTS idx_models_status ON models(status);
 """
 
 
 def connect(path: str | Path) -> sqlite3.Connection:
     Path(path).parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path)
+    conn = sqlite3.connect(str(path))
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
     conn.commit()
@@ -94,17 +162,30 @@ def mark_trained(conn: sqlite3.Connection, seed_id_value: str) -> None:
     conn.commit()
 
 
-def add_model(conn: sqlite3.Connection, model_id: str, seed_id_value: str, model_path: str, train_score: float, validation_score: float, promote: bool) -> None:
+def add_model(conn: sqlite3.Connection, model_id: str, seed_id_value: str, model_path: str, train_score: float, validation_score: float, promote: bool, status: str = "candidate") -> None:
     if promote:
-        conn.execute("UPDATE models SET promoted = 0 WHERE promoted = 1")
+        prev = conn.execute("SELECT validation_score FROM models WHERE promoted = 1 ORDER BY validation_score DESC LIMIT 1").fetchone()
+        previous_best = float(prev["validation_score"]) if prev else None
+        conn.execute("UPDATE models SET promoted = 0, status = 'archived' WHERE promoted = 1")
     conn.execute(
         """
         INSERT OR REPLACE INTO models
-        (model_id, seed_id, model_path, train_score, validation_score, promoted, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        (model_id, seed_id, model_path, train_score, validation_score, promoted, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (model_id, seed_id_value, model_path, float(train_score), float(validation_score), 1 if promote else 0, time.time()),
+        (model_id, seed_id_value, model_path, float(train_score), float(validation_score), 1 if promote else 0, status, time.time()),
     )
+    conn.commit()
+    if promote:
+        conn.execute(
+            "INSERT INTO promotion_history (created_at, model_id, seed_id, validation_points, previous_best_points, status) VALUES (?, ?, ?, ?, ?, 'promoted')",
+            (time.time(), model_id, seed_id_value, float(validation_score), previous_best),
+        )
+        conn.commit()
+
+
+def update_model_status(conn: sqlite3.Connection, model_id: str, status: str) -> None:
+    conn.execute("UPDATE models SET status = ? WHERE model_id = ?", (status, model_id))
     conn.commit()
 
 
@@ -117,3 +198,37 @@ def promoted_model(conn: sqlite3.Connection):
 def best_model_score(conn: sqlite3.Connection) -> float:
     row = promoted_model(conn)
     return float(row["validation_score"]) if row else float("-inf")
+
+
+def log_heartbeat(conn: sqlite3.Connection, component: str, pid: int | None = None) -> None:
+    conn.execute(
+        "INSERT OR REPLACE INTO heartbeats (component, last_seen, pid) VALUES (?, ?, ?)",
+        (component, time.time(), pid),
+    )
+    conn.commit()
+
+
+def log_search_run(conn: sqlite3.Connection, trials: int, candidates_found: int, cycle: int) -> int:
+    cur = conn.execute(
+        "INSERT INTO search_runs (started_at, trials, candidates_found, cycle) VALUES (?, ?, ?, ?)",
+        (time.time(), trials, candidates_found, cycle),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def log_training_run(conn: sqlite3.Connection, seed_id_value: str, model_id: str | None, average_precision: float | None, train_points: float | None, validation_points: float | None, promoted: bool, duration_seconds: float | None) -> int:
+    cur = conn.execute(
+        "INSERT INTO training_runs (started_at, seed_id, model_id, average_precision, train_points, validation_points, promoted, duration_seconds) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (time.time(), seed_id_value, model_id, average_precision, train_points, validation_points, 1 if promoted else 0, duration_seconds),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def log_prediction(conn: sqlite3.Connection, draw_date: str, mode: str, model_id: str | None, seed_id_value: str | None, main_numbers: list[int], bonus: int) -> None:
+    conn.execute(
+        "INSERT INTO prediction_logs (created_at, draw_date, mode, model_id, seed_id, main_numbers, bonus) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (time.time(), draw_date, mode, model_id, seed_id_value, json.dumps(main_numbers), bonus),
+    )
+    conn.commit()
