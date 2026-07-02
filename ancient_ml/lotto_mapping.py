@@ -20,6 +20,11 @@ from .vedic_engine import (
 )
 
 
+@lru_cache(maxsize=20000)
+def _cached_transits(draw_date_iso: str, ayanamsha: str, hour_utc: float = 0.0):
+    return transit_positions(date.fromisoformat(draw_date_iso), ayanamsha, hour_utc=hour_utc)
+
+
 def fold_1_49(x: float | int) -> int:
     """Map any numeric chart factor into the Lotto 1..49 domain."""
     return int(abs(round(float(x)))) % 49 + 1
@@ -57,7 +62,7 @@ def candidate_anchor_numbers(seed: SyntheticSeed, draw_date: date) -> list[int]:
     experimental Lotto layer.
     """
     kundli = _cached_kundli(_seed_to_tuple(seed))
-    transits = transit_positions(draw_date, seed.ayanamsha, hour_utc=0.0)
+    transits = _cached_transits(draw_date.isoformat(), seed.ayanamsha, 0.0)
     anchors: list[int] = []
 
     anchors.append(fold_1_49(kundli.lagna_longitude))

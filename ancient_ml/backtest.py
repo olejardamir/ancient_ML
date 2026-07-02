@@ -9,7 +9,7 @@ import joblib
 import numpy as np
 
 from .baselines import all_baselines
-from .data import load_draws, split_time_ordered
+from .data import load_draws, split_time_ordered_3
 from .feature_builder import feature_vector
 from .lotto_mapping import cheap_predict
 from .predictor import predict_with_payload
@@ -25,10 +25,9 @@ from .vedic_engine import SyntheticSeed
 
 def run_backtest(args: argparse.Namespace) -> None:
     draws = load_draws(args.data)
-    test_fraction = 1.0 - args.train_fraction
-    train_draws, test_draws = split_time_ordered(draws, args.train_fraction)
     conn = connect(args.state)
 
+    train_draws, _val_draws, test_draws = split_time_ordered_3(draws, args.train_fraction, args.validation_fraction)
     if not test_draws:
         raise SystemExit("Not enough draws for a test set.")
 
@@ -123,3 +122,4 @@ def add_backtest_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--state", default="state/ancient_ml.sqlite")
     parser.add_argument("--models", default="models")
     parser.add_argument("--train-fraction", type=float, default=0.70)
+    parser.add_argument("--validation-fraction", type=float, default=0.15)

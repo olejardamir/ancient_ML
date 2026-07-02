@@ -138,3 +138,16 @@ def split_time_ordered(draws: list[Draw], train_fraction: float = 0.70) -> tuple
         return draws, draws
     cut = max(1, min(len(draws) - 1, int(len(draws) * train_fraction)))
     return draws[:cut], draws[cut:]
+
+
+def split_time_ordered_3(
+    draws: list[Draw],
+    train_fraction: float = 0.70,
+    validation_fraction: float = 0.15,
+) -> tuple[list[Draw], list[Draw], list[Draw]]:
+    if not draws:
+        return [], [], []
+    n = len(draws)
+    train_cut = max(1, min(n - 2, int(n * train_fraction)))
+    val_cut = max(train_cut + 1, min(n - 1, int(n * (train_fraction + validation_fraction))))
+    return draws[:train_cut], draws[train_cut:val_cut], draws[val_cut:]

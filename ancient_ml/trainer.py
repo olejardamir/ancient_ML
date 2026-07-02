@@ -52,7 +52,7 @@ def train_for_seed(seed, train_draws, validation_draws, previous_model_path: str
         l1_ratio=0.10,
         max_iter=2000,
         tol=1e-4,
-        class_weight="balanced",
+        class_weight=None,
         random_state=42,
     )
 
@@ -125,10 +125,7 @@ def run_train(args: argparse.Namespace) -> None:
         promote = val_points > current_best
         model_id = "model_" + uuid.uuid4().hex[:12]
         model_path = str(Path(args.models) / f"{model_id}.joblib")
-        status = "candidate"
-
-        if promote:
-            status = "candidate"
+        status = "promoted" if promote else "candidate"
 
         payload = {
             "scaler": components["scaler"],

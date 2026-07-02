@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+from functools import lru_cache
 from math import cos, pi, sin
 from typing import Iterable
 
@@ -19,6 +20,11 @@ from .vedic_engine import (
 )
 
 
+@lru_cache(maxsize=20000)
+def _cached_transits(draw_date_iso: str, ayanamsha: str, hour_utc: float = 0.0):
+    return transit_positions(date.fromisoformat(draw_date_iso), ayanamsha, hour_utc=hour_utc)
+
+
 @dataclass(frozen=True)
 class FeatureConfig:
     include_transits: bool = True
@@ -29,7 +35,7 @@ class FeatureConfig:
 def feature_vector(seed: SyntheticSeed, draw_date: date, number: int, cfg: FeatureConfig | None = None) -> np.ndarray:
     cfg = cfg or FeatureConfig()
     kundli = _cached_kundli(_seed_to_tuple(seed))
-    transits = transit_positions(draw_date, seed.ayanamsha, hour_utc=0.0)
+    transits = _cached_transits(draw_date.isoformat(), seed.ayanamsha, 0.0)
     feats: list[float] = []
 
     # Number harmonics help the model represent cyclical folded Jyotish factors.

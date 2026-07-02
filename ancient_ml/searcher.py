@@ -6,7 +6,7 @@ import random
 import time
 from typing import Iterable
 
-from .data import Draw, load_draws, split_time_ordered
+from .data import Draw, load_draws, split_time_ordered_3
 from .lotto_mapping import cheap_predict
 from .registry import add_candidate, best_candidates, connect, row_to_seed
 from .scoring import Prediction, score_predictions
@@ -56,10 +56,10 @@ def evaluate_seed(seed: SyntheticSeed, train_draws: list[Draw], validation_draws
     }
 
 
-def search_once(draws: list[Draw], state_path: str, trials: int, top_k: int, rng_seed: int | None = None, validation_weight: float = 2.0) -> None:
+def search_once(draws: list[Draw], state_path: str, trials: int, top_k: int, rng_seed: int | None = None, validation_weight: float = 2.0, train_fraction: float = 0.70, validation_fraction: float = 0.15) -> None:
     rng = random.Random(rng_seed)
     conn = connect(state_path)
-    train_draws, validation_draws = split_time_ordered(draws, 0.70)
+    train_draws, validation_draws, _test_draws = split_time_ordered_3(draws, train_fraction, validation_fraction)
 
     # Reload best known candidates from SQLite so mutations continue from
     # previous cycles instead of restarting from scratch each time.
@@ -109,7 +109,7 @@ def run_search(args: argparse.Namespace) -> None:
     while True:
         cycle += 1
         print(f"Search cycle {cycle}: trials={args.trials}", flush=True)
-        search_once(draws, args.state, args.trials, args.top_k, args.seed)
+        search_once(draws, args.state, args.trials, args.top_k, args.seed, train_fraction=args.train_fraction, validation_fraction=args.validation_fraction)
         if not args.forever:
             break
         time.sleep(args.sleep)
@@ -123,3 +123,5 @@ def add_search_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--forever", action="store_true")
     parser.add_argument("--sleep", type=float, default=1.0)
     parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--train-fraction", type=float, default=0.70)
+    parser.add_argument("--validation-fraction", type=float, default=0.15)
