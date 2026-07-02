@@ -13,7 +13,7 @@ from sklearn.linear_model import SGDClassifier
 from sklearn.metrics import average_precision_score
 from sklearn.preprocessing import StandardScaler
 
-from .data import load_draws, split_time_ordered
+from .data import load_draws, split_time_ordered_3
 from .feature_builder import build_training_matrix, feature_vector
 from .registry import (
     add_model,
@@ -89,7 +89,7 @@ def _existing_model_for_seed(conn, seed_id_value: str) -> str | None:
 
 def run_train(args: argparse.Namespace) -> None:
     draws = load_draws(args.data)
-    train_draws, validation_draws = split_time_ordered(draws, args.train_fraction)
+    train_draws, validation_draws, _test_draws = split_time_ordered_3(draws, args.train_fraction, args.validation_fraction)
     conn = connect(args.state)
     Path(args.models).mkdir(parents=True, exist_ok=True)
     rows = best_candidates(conn, limit=args.max_candidates, only_untrained=args.only_untrained)
@@ -176,4 +176,5 @@ def add_train_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--models", default="models")
     parser.add_argument("--max-candidates", type=int, default=5)
     parser.add_argument("--train-fraction", type=float, default=0.70)
+    parser.add_argument("--validation-fraction", type=float, default=0.15)
     parser.add_argument("--only-untrained", action="store_true")
