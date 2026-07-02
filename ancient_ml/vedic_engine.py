@@ -237,6 +237,23 @@ def transit_positions(draw_date: date, ayanamsha: str = "LAHIRI", hour_utc: floa
     return {name: graha_position(name, lon) for name, lon in longs.items()}
 
 
+def precompute_all_transits(draws: Iterable, ayanamsha: str = "LAHIRI", hour_utc: float = 0.0) -> dict[str, dict[str, GrahaPosition]]:
+    """Precompute transit positions for all unique draw dates.
+
+    Returns {iso_date: {planet_name: GrahaPosition}} — a fully serializable
+    dict that can be pickled across process boundaries, eliminating ALL Swiss
+    Ephemeris swe.calc_ut calls from worker processes.
+    """
+    seen: set[str] = set()
+    cache: dict[str, dict[str, GrahaPosition]] = {}
+    for d in draws:
+        iso = d.draw_date.isoformat()
+        if iso not in seen:
+            seen.add(iso)
+            cache[iso] = transit_positions(d.draw_date, ayanamsha, hour_utc=hour_utc)
+    return cache
+
+
 def house_from_lagna(lagna_sign: int, body_sign: int) -> int:
     return ((body_sign - lagna_sign) % 12) + 1
 

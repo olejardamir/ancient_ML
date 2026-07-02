@@ -8,11 +8,11 @@ from pathlib import Path
 import joblib
 import numpy as np
 
-from .feature_builder import feature_vector
-from .lotto_mapping import cheap_predict
+from .feature_builder import feature_vector, set_transit_cache as fb_set_transit_cache
+from .lotto_mapping import cheap_predict, set_transit_cache as lotto_set_transit_cache
 from .registry import best_candidates, connect, log_prediction, promoted_model, row_to_seed
 from .scoring import Prediction
-from .vedic_engine import SyntheticSeed
+from .vedic_engine import SyntheticSeed, transit_positions
 
 
 def predict_with_payload(payload: dict, draw_date: date) -> Prediction:
@@ -33,6 +33,9 @@ def predict_with_payload(payload: dict, draw_date: date) -> Prediction:
 def run_predict(args: argparse.Namespace) -> None:
     d = date.fromisoformat(args.date)
     conn = connect(args.state)
+    transit_cache = {d.isoformat(): transit_positions(d, "LAHIRI", 0.0)}
+    fb_set_transit_cache(transit_cache)
+    lotto_set_transit_cache(transit_cache)
     model_row = promoted_model(conn)
     result: dict
     if model_row:

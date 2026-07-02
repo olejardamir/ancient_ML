@@ -14,7 +14,7 @@ from sklearn.metrics import average_precision_score
 from sklearn.preprocessing import StandardScaler
 
 from .data import load_draws, split_time_ordered_3
-from .feature_builder import build_training_matrix, feature_vector
+from .feature_builder import build_training_matrix, feature_vector, set_transit_cache as fb_set_transit_cache
 from .registry import (
     add_model,
     best_candidates,
@@ -26,6 +26,7 @@ from .registry import (
     update_model_status,
 )
 from .scoring import Prediction, score_predictions
+from .vedic_engine import precompute_all_transits
 
 
 def _predict_with_model(scaler, classifier, seed, draw_date) -> Prediction:
@@ -90,6 +91,7 @@ def _existing_model_for_seed(conn, seed_id_value: str) -> str | None:
 def run_train(args: argparse.Namespace) -> None:
     draws = load_draws(args.data)
     train_draws, validation_draws, _test_draws = split_time_ordered_3(draws, args.train_fraction, args.validation_fraction)
+    fb_set_transit_cache(precompute_all_transits(train_draws + validation_draws, "LAHIRI", 0.0))
     conn = connect(args.state)
     Path(args.models).mkdir(parents=True, exist_ok=True)
     rows = best_candidates(conn, limit=args.max_candidates, only_untrained=args.only_untrained)

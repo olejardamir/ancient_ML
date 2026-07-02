@@ -10,18 +10,28 @@ from __future__ import annotations
 from datetime import date
 from functools import lru_cache
 from math import cos, pi, sin
+from typing import Iterable
 
 from .vedic_engine import (
     PLANETS,
+    GrahaPosition,
     SyntheticSeed,
     build_kundli,
     house_from_lagna,
     transit_positions,
 )
 
+_TRANSIT_CACHE: dict[str, dict[str, GrahaPosition]] | None = None
 
-@lru_cache(maxsize=20000)
-def _cached_transits(draw_date_iso: str, ayanamsha: str, hour_utc: float = 0.0):
+
+def set_transit_cache(cache: dict[str, dict[str, GrahaPosition]]) -> None:
+    global _TRANSIT_CACHE
+    _TRANSIT_CACHE = cache
+
+
+def _get_transits(draw_date_iso: str, ayanamsha: str, hour_utc: float = 0.0) -> dict[str, GrahaPosition]:
+    if _TRANSIT_CACHE is not None:
+        return _TRANSIT_CACHE[draw_date_iso]
     return transit_positions(date.fromisoformat(draw_date_iso), ayanamsha, hour_utc=hour_utc)
 
 
@@ -62,7 +72,7 @@ def candidate_anchor_numbers(seed: SyntheticSeed, draw_date: date) -> list[int]:
     experimental Lotto layer.
     """
     kundli = _cached_kundli(_seed_to_tuple(seed))
-    transits = _cached_transits(draw_date.isoformat(), seed.ayanamsha, 0.0)
+    transits = _get_transits(draw_date.isoformat(), seed.ayanamsha, 0.0)
     anchors: list[int] = []
 
     anchors.append(fold_1_49(kundli.lagna_longitude))

@@ -3,15 +3,18 @@ from __future__ import annotations
 import argparse
 from concurrent.futures import ProcessPoolExecutor
 from datetime import date
+from queue import Queue
 import random
+import sqlite3
+import threading
 import time
 from typing import Iterable
 
 from .data import Draw, load_draws, split_time_ordered_3
-from .lotto_mapping import cheap_predict
+from .lotto_mapping import cheap_predict, set_transit_cache as lotto_set_transit_cache
 from .registry import add_candidate, best_candidates, connect, log_search_run, row_to_seed
 from .scoring import Prediction, score_predictions
-from .vedic_engine import SyntheticSeed
+from .vedic_engine import GrahaPosition, SyntheticSeed, precompute_all_transits
 
 
 def random_seed(rng: random.Random, year_min: int = -5000, year_max: int = 5000) -> SyntheticSeed:
@@ -65,7 +68,10 @@ def _worker_search(
     parent_seeds: list[SyntheticSeed],
     validation_weight: float,
     scale_schedule: bool,
+    transit_cache: dict[str, dict[str, GrahaPosition]] | None = None,
 ) -> list[tuple[float, SyntheticSeed, dict]]:
+    if transit_cache is not None:
+        lotto_set_transit_cache(transit_cache)
     rng = random.Random(rng_seed)
     best: list[tuple[float, SyntheticSeed, dict]] = [
         (0.0, s, {"from_registry": True}) for s in parent_seeds
@@ -91,7 +97,38 @@ def _worker_search(
     return best
 
 
-def search_once(draws: list[Draw], state_path: str, trials: int, top_k: int, rng_seed: int | None = None, validation_weight: float = 2.0, train_fraction: float = 0.70, validation_fraction: float = 0.15, workers: int = 1) -> None:
+def _report_progress(
+    start: float,
+    stop_event: threading.Event,
+    report_interval: float,
+    workers: int,
+    completed_queue: Queue,
+    all_results: list,
+    results_lock: threading.Lock,
+    top_k: int,
+) -> None:
+    """Background thread: prints in-memory progress from completed workers."""
+    last_completed = 0
+    while not stop_event.wait(report_interval):
+        elapsed = time.time() - start
+        done = completed_queue.qsize()
+        partial_best = ""
+        with results_lock:
+            snapshot = list(all_results)
+        if snapshot:
+            sorted_results = sorted(snapshot, key=lambda x: x[0], reverse=True)[:top_k]
+            if sorted_results:
+                avg_hits = sum(r[2]["hits_per_draw"] for r in sorted_results) / len(sorted_results)
+                best_hits = sorted_results[0][2]["hits_per_draw"]
+                best_val = sorted_results[0][2]["validation"]["points"]
+                partial_best = f" top1_val_score={best_val:.2f} top1_hits/draw={best_hits:.3f} avg_hits/draw(top{len(sorted_results)})={avg_hits:.3f}"
+        print(
+            f"\n=== Progress [{elapsed:.0f}s] workers_done={done}/{workers}{partial_best} ===\n",
+            flush=True,
+        )
+
+
+def search_once(draws: list[Draw], state_path: str, trials: int, top_k: int, rng_seed: int | None = None, validation_weight: float = 2.0, train_fraction: float = 0.70, validation_fraction: float = 0.15, workers: int = 1, report_interval: float = 120.0) -> None:
     conn = connect(state_path)
     train_draws, validation_draws, _test_draws = split_time_ordered_3(draws, train_fraction, validation_fraction)
 
@@ -103,7 +140,26 @@ def search_once(draws: list[Draw], state_path: str, trials: int, top_k: int, rng
     trials_per_worker = max(1, trials // workers)
     candidates_before = conn.execute("SELECT COUNT(*) FROM candidates").fetchone()[0]
 
+    # Precompute ALL transit positions once. Transit depends only on draw_date
+    # and ayanamsha, never on seed — this eliminates ALL swe.calc_ut calls from
+    # worker processes.
+    transit_cache = precompute_all_transits(train_draws + validation_draws, "LAHIRI", 0.0)
+    # Also set in main process for single-worker mode
+    lotto_set_transit_cache(transit_cache)
+
+    start_time = time.time()
+    stop_event = threading.Event()
+    completed_queue: Queue = Queue()
+    all_results: list[tuple[float, SyntheticSeed, dict]] = []
+    results_lock = threading.Lock()
+
     if workers > 1:
+        prog_thread = threading.Thread(
+            target=_report_progress,
+            args=(start_time, stop_event, report_interval, workers, completed_queue, all_results, results_lock, top_k),
+            daemon=True,
+        )
+        prog_thread.start()
         futures = []
         with ProcessPoolExecutor(max_workers=workers) as executor:
             for w in range(workers):
@@ -118,14 +174,16 @@ def search_once(draws: list[Draw], state_path: str, trials: int, top_k: int, rng
                     parent_seeds,
                     validation_weight,
                     True,
+                    transit_cache,
                 )
                 futures.append(fut)
 
-        all_results: list[tuple[float, SyntheticSeed, dict]] = []
         for w, fut in enumerate(futures):
             try:
                 worker_best = fut.result()
-                all_results.extend(worker_best)
+                with results_lock:
+                    all_results.extend(worker_best)
+                completed_queue.put(1)
                 print(f"  Worker {w + 1}/{workers} returned {len(worker_best)} candidates", flush=True)
             except Exception as exc:
                 print(f"  Worker {w + 1}/{workers} failed: {exc}", flush=True)
@@ -150,13 +208,20 @@ def search_once(draws: list[Draw], state_path: str, trials: int, top_k: int, rng
                 flush=True,
             )
         print(f"Merged {merged} candidates from {workers} workers", flush=True)
+        stop_event.set()
     else:
         rng = random.Random(rng_seed)
         best: list[tuple[float, SyntheticSeed, dict]] = [
             (0.0, s, {"from_registry": True}) for s in parent_seeds
         ]
 
+        last_report = start_time
         for i in range(1, trials + 1):
+            now = time.time()
+            if now - last_report >= report_interval:
+                total_cands = conn.execute("SELECT COUNT(*) FROM candidates").fetchone()[0]
+                print(f"  [{i}/{trials} elapsed={now - start_time:.0f}s candidates={total_cands} best_hits={best[0][0] if best else 0:.3f}]", flush=True)
+                last_report = now
             if best and rng.random() < 0.35:
                 parent = rng.choice(best)[1]
                 seed = mutate_seed(parent, rng, scale=max(0.05, 1.0 - i / max(trials, 1)))
@@ -203,6 +268,7 @@ def run_search(args: argparse.Namespace) -> None:
             train_fraction=args.train_fraction,
             validation_fraction=args.validation_fraction,
             workers=args.workers,
+            report_interval=args.report_interval,
         )
         if not args.forever:
             break
@@ -217,6 +283,7 @@ def add_search_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--forever", action="store_true")
     parser.add_argument("--sleep", type=float, default=1.0)
+    parser.add_argument("--report-interval", type=float, default=120.0, help="Seconds between progress reports")
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--train-fraction", type=float, default=0.70)
     parser.add_argument("--validation-fraction", type=float, default=0.15)

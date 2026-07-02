@@ -11,6 +11,7 @@ import numpy as np
 from .lotto_mapping import circular_distance_49, fold_1_49, _cached_kundli, _seed_to_tuple
 from .vedic_engine import (
     DASHA_ORDER,
+    GrahaPosition,
     PLANETS,
     SyntheticSeed,
     build_kundli,
@@ -19,9 +20,17 @@ from .vedic_engine import (
     vimshottari_lords,
 )
 
+_TRANSIT_CACHE: dict[str, dict[str, GrahaPosition]] | None = None
 
-@lru_cache(maxsize=20000)
-def _cached_transits(draw_date_iso: str, ayanamsha: str, hour_utc: float = 0.0):
+
+def set_transit_cache(cache: dict[str, dict[str, GrahaPosition]]) -> None:
+    global _TRANSIT_CACHE
+    _TRANSIT_CACHE = cache
+
+
+def _get_transits(draw_date_iso: str, ayanamsha: str, hour_utc: float = 0.0) -> dict[str, GrahaPosition]:
+    if _TRANSIT_CACHE is not None:
+        return _TRANSIT_CACHE[draw_date_iso]
     return transit_positions(date.fromisoformat(draw_date_iso), ayanamsha, hour_utc=hour_utc)
 
 
@@ -35,7 +44,7 @@ class FeatureConfig:
 def feature_vector(seed: SyntheticSeed, draw_date: date, number: int, cfg: FeatureConfig | None = None) -> np.ndarray:
     cfg = cfg or FeatureConfig()
     kundli = _cached_kundli(_seed_to_tuple(seed))
-    transits = _cached_transits(draw_date.isoformat(), seed.ayanamsha, 0.0)
+    transits = _get_transits(draw_date.isoformat(), seed.ayanamsha, 0.0)
     feats: list[float] = []
 
     # Number harmonics help the model represent cyclical folded Jyotish factors.

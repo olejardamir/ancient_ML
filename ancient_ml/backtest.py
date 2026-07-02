@@ -10,8 +10,8 @@ import numpy as np
 
 from .baselines import all_baselines
 from .data import load_draws, split_time_ordered_3
-from .feature_builder import feature_vector
-from .lotto_mapping import cheap_predict
+from .feature_builder import feature_vector, set_transit_cache as fb_set_transit_cache
+from .lotto_mapping import cheap_predict, set_transit_cache as lotto_set_transit_cache
 from .predictor import predict_with_payload
 from .registry import (
     best_candidates,
@@ -20,7 +20,7 @@ from .registry import (
     row_to_seed,
 )
 from .scoring import Prediction, score_predictions, random_expected_hits_per_draw
-from .vedic_engine import SyntheticSeed
+from .vedic_engine import SyntheticSeed, precompute_all_transits
 
 
 def run_backtest(args: argparse.Namespace) -> None:
@@ -30,6 +30,10 @@ def run_backtest(args: argparse.Namespace) -> None:
     train_draws, _val_draws, test_draws = split_time_ordered_3(draws, args.train_fraction, args.validation_fraction)
     if not test_draws:
         raise SystemExit("Not enough draws for a test set.")
+
+    transit_cache = precompute_all_transits(train_draws + test_draws, "LAHIRI", 0.0)
+    fb_set_transit_cache(transit_cache)
+    lotto_set_transit_cache(transit_cache)
 
     print(f"Backtest: {len(train_draws)} train, {len(test_draws)} test draws\n")
 
