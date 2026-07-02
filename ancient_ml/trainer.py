@@ -122,7 +122,12 @@ def run_train(args: argparse.Namespace) -> None:
         val_points = float(metrics["validation"]["points"])
         ap = float(metrics["average_precision"])
 
-        promote = val_points > current_best
+        cheap_seed_val_points = float(row["validation_score"])
+        min_improvement = 0.01 * len(validation_draws)
+        promote = (
+            val_points > current_best
+            and val_points >= cheap_seed_val_points + min_improvement
+        )
         model_id = "model_" + uuid.uuid4().hex[:12]
         model_path = str(Path(args.models) / f"{model_id}.joblib")
         status = "promoted" if promote else "candidate"
@@ -167,7 +172,8 @@ def run_train(args: argparse.Namespace) -> None:
             current_best = val_points
             print(f"PROMOTED {model_id}: validation_points={val_points:.4f} ap={ap:.4f} hits/draw={metrics['validation']['hits_per_draw']:.3f}")
         else:
-            print(f"Kept as non-promoted {model_id}: validation_points={val_points:.4f} (best={current_best:.4f})")
+            print(f"Kept as non-promoted {model_id}: validation_points={val_points:.4f} "
+                  f"(need > best={current_best:.4f} AND >= cheap_seed={cheap_seed_val_points:.4f} + margin={min_improvement:.2f})")
 
 
 def add_train_args(parser: argparse.ArgumentParser) -> None:
